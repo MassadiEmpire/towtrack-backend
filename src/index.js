@@ -1,3 +1,7 @@
+// Force IPv4 DNS resolution globally — Railway's network doesn't route IPv6 to Supabase
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

@@ -17,6 +17,16 @@ app.use(express.json());
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'towtrack-api' }));
 
+// DB connectivity check
+app.get('/health/db', async (req, res) => {
+  try {
+    const result = await db.query('SELECT COUNT(*) AS users FROM users');
+    res.json({ status: 'ok', users: result.rows[0].users });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message, code: err.code });
+  }
+});
+
 // Routes
 app.use('/auth', authRoutes);
 app.use('/profile', profileRoutes);

@@ -28,7 +28,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { pickupAddress, vehicleInfo, notes, pickupLat, pickupLng, destAddress, destLat, destLng } = req.body;
+    const { pickupAddress, vehicleInfo, notes, pickupLat, pickupLng, dropoffAddress, destAddress, destLat, destLng } = req.body;
 
     try {
       const active = await db.query(
@@ -51,7 +51,7 @@ router.post(
           pickupAddress,
           pickupLat   || 0,
           pickupLng   || 0,
-          destAddress || null,
+          dropoffAddress || destAddress || null,
           destLat     || null,
           destLng     || null,
           vehicleInfo || null,
@@ -206,12 +206,14 @@ router.patch('/:id/status', authenticate, async (req, res) => {
       const driverId = dp.rows[0].id;
 
       if (status === 'accepted' && towRequest.status === 'pending') {
+        const { quotedPrice } = req.body;
         const update = await db.query(
           `UPDATE tow_requests
            SET status = 'accepted', driver_id = $1, accepted_at = NOW()
+               ${quotedPrice != null ? ', estimated_price = $3' : ''}
            WHERE id = $2 AND status = 'pending'
            RETURNING *`,
-          [driverId, id]
+          quotedPrice != null ? [driverId, id, parseFloat(quotedPrice)] : [driverId, id]
         );
         if (update.rows.length === 0) {
           return res.status(409).json({ error: 'Request was already accepted by another driver' });

@@ -6,16 +6,21 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const authRoutes    = require('./routes/auth');
-const profileRoutes = require('./routes/profile');
-const towRoutes     = require('./routes/tow');
-const db            = require('./db');
-const { runDispatch } = require('./agents/dispatch');
+const authRoutes     = require('./routes/auth');
+const profileRoutes  = require('./routes/profile');
+const towRoutes      = require('./routes/tow');
+const paymentRoutes  = require('./routes/payments');
+const db                 = require('./db');
+const { runMigrations }  = require('./db');
+const { runDispatch }    = require('./agents/dispatch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
+
+// Stripe webhook needs raw body — must be before express.json()
+app.use('/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 // Health check
@@ -35,6 +40,7 @@ app.get('/health/db', async (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/profile', profileRoutes);
 app.use('/tow-requests', towRoutes);
+app.use('/payments', paymentRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
@@ -45,8 +51,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`TowTrack API running on port ${PORT}`);
+  await runMigrations().catch((e) => console.error('Migration startup error:', e.message));
 
   // Run dispatch agent every 30 seconds when ANTHROPIC_API_KEY is set
   if (process.env.ANTHROPIC_API_KEY) {

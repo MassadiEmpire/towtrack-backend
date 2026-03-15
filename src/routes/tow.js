@@ -58,6 +58,24 @@ router.post(
           notes       || null,
         ]
       );
+
+      // Notify all available drivers that a new job is waiting
+      const drivers = await db.query(
+        `SELECT u.push_token
+         FROM driver_profiles dp
+         JOIN users u ON u.id = dp.user_id
+         WHERE dp.is_available = true AND u.push_token IS NOT NULL`
+      );
+      const vehicleLabel = vehicleInfo ? ` — ${vehicleInfo}` : '';
+      drivers.rows.forEach(({ push_token }) => {
+        sendPush(
+          push_token,
+          'New Job Available 🚛',
+          `Pickup: ${pickupAddress}${vehicleLabel}`,
+          { requestId: result.rows[0].id, type: 'new_request' }
+        );
+      });
+
       return res.status(201).json({ request: result.rows[0] });
     } catch (err) {
       console.error('Create tow request error:', err);
@@ -76,12 +94,11 @@ router.get('/active', authenticate, requireRole('customer'), async (req, res) =>
               dp.vehicle_make,
               dp.vehicle_model,
               dp.rating AS driver_rating,
-              ST_Y(dl.location::geometry) AS driver_lat,
-              ST_X(dl.location::geometry) AS driver_lng
+              dp.current_lat AS driver_lat,
+              dp.current_lng AS driver_lng
        FROM tow_requests tr
        LEFT JOIN driver_profiles dp ON dp.id = tr.driver_id
        LEFT JOIN users u            ON u.id  = dp.user_id
-       LEFT JOIN driver_locations dl ON dl.driver_id = dp.id
        WHERE tr.customer_id = $1
          AND tr.status NOT IN ('completed', 'cancelled')
        ORDER BY tr.created_at DESC
@@ -258,6 +275,86 @@ router.patch('/:id/status', authenticate, async (req, res) => {
     return res.json({ request: result.rows[0] });
   } catch (err) {
     console.error('Update status error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /tow-requests/:id/review — submit a star rating + optional comment
+// Called by both customer (reviewer_role='customer') and driver (reviewer_role='driver')
+router.post('/:id/review', authenticate, async (req, res) => {
+  const { id } = req.params;
+  const { rating, comment } = req.body;
+
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'rating must be between 1 and 5' });
+  }
+
+  try {
+    // Verify the job exists and is completed
+    const jobRes = await db.query('SELECT * FROM tow_requests WHERE id = $1', [id]);
+    const job = jobRes.rows[0];
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== 'completed') return res.status(400).json({ error: 'Can only review completed jobs' });
+
+    // Customer may only review their own job; driver may only review jobs they completed
+    if (req.user.role === 'customer' && job.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Not your job' });
+    }
+
+    const reviewerRole = req.user.role === 'driver' ? 'driver' : 'customer';
+
+    // Get driver_profile id for the job
+    if (!job.driver_id) return res.status(400).json({ error: 'No driver assigned to this job' });
+
+    if (req.user.role === 'driver') {
+      const dp = await db.query('SELECT id FROM driver_profiles WHERE user_id = $1', [req.user.id]);
+      if (!dp.rows[0] || dp.rows[0].id !== job.driver_id) {
+        return res.status(403).json({ error: 'Not your job' });
+      }
+    }
+
+    // Upsert review (allow re-rating)
+    const result = await db.query(
+      `INSERT INTO reviews (request_id, reviewer_id, driver_id, reviewer_role, rating, comment)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (request_id, reviewer_role) DO UPDATE
+         SET rating = EXCLUDED.rating, comment = EXCLUDED.comment
+       RETURNING *`,
+      [id, req.user.id, job.driver_id, reviewerRole, parseInt(rating), comment || null]
+    );
+
+    // Update driver's average rating (customer reviews only)
+    if (reviewerRole === 'customer') {
+      await db.query(
+        `UPDATE driver_profiles
+         SET rating = (
+           SELECT ROUND(AVG(r.rating)::numeric, 2)
+           FROM reviews r
+           WHERE r.driver_id = $1 AND r.reviewer_role = 'customer'
+         )
+         WHERE id = $1`,
+        [job.driver_id]
+      );
+    }
+
+    return res.json({ review: result.rows[0] });
+  } catch (err) {
+    console.error('Review error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /tow-requests/:id/review — check if a review already exists for this job/role
+router.get('/:id/review', authenticate, async (req, res) => {
+  const { id } = req.params;
+  const reviewerRole = req.user.role === 'driver' ? 'driver' : 'customer';
+  try {
+    const result = await db.query(
+      'SELECT * FROM reviews WHERE request_id = $1 AND reviewer_role = $2',
+      [id, reviewerRole]
+    );
+    return res.json({ review: result.rows[0] || null });
+  } catch (err) {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

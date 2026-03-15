@@ -153,13 +153,10 @@ router.put('/driver/location', authenticate, async (req, res) => {
     const driverId = dp.rows[0].id;
 
     await db.query(
-      `INSERT INTO driver_locations (driver_id, location, heading, updated_at)
-       VALUES ($1, ST_MakePoint($2, $3)::geography, $4, NOW())
-       ON CONFLICT (driver_id) DO UPDATE
-       SET location = ST_MakePoint($2, $3)::geography,
-           heading  = $4,
-           updated_at = NOW()`,
-      [driverId, lng, lat, heading ?? null]
+      `UPDATE driver_profiles
+       SET current_lat = $1, current_lng = $2, location_updated_at = NOW()
+       WHERE id = $3`,
+      [lat, lng, driverId]
     );
 
     return res.json({ ok: true });

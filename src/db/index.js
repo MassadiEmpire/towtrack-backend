@@ -18,6 +18,16 @@ const query = (text, params) => pool.query(text, params);
  */
 async function runMigrations() {
   const migrations = [
+    // Push token on users (required for push notifications)
+    `ALTER TABLE users
+       ADD COLUMN IF NOT EXISTS push_token VARCHAR(255)`,
+
+    // Driver location columns on driver_profiles
+    `ALTER TABLE driver_profiles
+       ADD COLUMN IF NOT EXISTS current_lat          DOUBLE PRECISION,
+       ADD COLUMN IF NOT EXISTS current_lng          DOUBLE PRECISION,
+       ADD COLUMN IF NOT EXISTS location_updated_at  TIMESTAMPTZ`,
+
     // Payment columns on tow_requests (missing from original schema)
     `ALTER TABLE tow_requests
        ADD COLUMN IF NOT EXISTS payment_status    VARCHAR(20) DEFAULT 'unpaid',

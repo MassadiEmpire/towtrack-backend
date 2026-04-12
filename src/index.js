@@ -1,63 +1,47 @@
-// Force IPv4 DNS resolution globally — Railway's network doesn't route IPv6 to Supabase
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
+const cors    = require('cors');
 
-const authRoutes     = require('./routes/auth');
-const profileRoutes  = require('./routes/profile');
-const towRoutes      = require('./routes/tow');
-const paymentRoutes  = require('./routes/payments');
-const db                 = require('./db');
-const { runMigrations }  = require('./db');
-const { runDispatch }    = require('./agents/dispatch');
+const authRoutes    = require('./routes/auth');
+const profileRoutes = require('./routes/profile');
+const dealsRoutes   = require('./routes/deals');
+const paymentRoutes = require('./routes/payments');
+const db            = require('./db');
+const { runMigrations } = require('./db');
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-
-// Stripe webhook needs raw body — must be before express.json()
 app.use('/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
-// Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'towtrack-api' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'settld-api' }));
 
-// DB connectivity check
 app.get('/health/db', async (req, res) => {
   try {
     const result = await db.query('SELECT COUNT(*) AS users FROM users');
     res.json({ status: 'ok', users: result.rows[0].users });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message, code: err.code });
+    res.status(500).json({ status: 'error', message: err.message });
   }
 });
 
-// Routes
-app.use('/auth', authRoutes);
-app.use('/profile', profileRoutes);
-app.use('/tow-requests', towRoutes);
+app.use('/auth',     authRoutes);
+app.use('/profile',  profileRoutes);
+app.use('/deals',    dealsRoutes);
 app.use('/payments', paymentRoutes);
 
-// 404 handler
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
-
-// Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(PORT, async () => {
-  console.log(`TowTrack API running on port ${PORT}`);
+  console.log(`Settld API running on port ${PORT}`);
   await runMigrations().catch((e) => console.error('Migration startup error:', e.message));
-
-  // Run dispatch agent every 30 seconds when ANTHROPIC_API_KEY is set
-  if (process.env.ANTHROPIC_API_KEY) {
-    setInterval(() => runDispatch(db), 30000);
-    console.log('Dispatch agent active (30s cycle)');
-  }
 });

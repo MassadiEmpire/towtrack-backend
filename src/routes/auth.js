@@ -22,7 +22,7 @@ router.post(
     body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
     body('phone').trim().notEmpty().withMessage('Phone is required'),
     body('password').isLength({ min: 6 }).withMessage('Password must be 6+ characters'),
-    body('role').isIn(['customer', 'driver']).withMessage('Role must be customer or driver'),
+    body('role').optional(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -46,7 +46,7 @@ router.post(
         `INSERT INTO users (name, email, phone, password_hash, role)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, name, email, phone, role, created_at`,
-        [name, email, phone, passwordHash, role]
+        [name, email, phone, passwordHash, role || 'user']
       );
       const user = userResult.rows[0];
 
